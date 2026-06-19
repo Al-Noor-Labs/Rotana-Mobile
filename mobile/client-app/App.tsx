@@ -2,7 +2,14 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, StyleSheet, BackHandler, Animated } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { Provider } from 'react-redux';
+import { store } from './src/store/store';
+import { useAppDispatch, useAppSelector } from './src/store/hooks';
+import { logoutUser, clearAuth } from './src/store/slices/authSlice';
 import SplashScreen from './src/screens/SplashScreen';
+import { apiClient } from './src/services/ApiClient';
+import AuthChoiceScreen from './src/screens/AuthChoiceScreen';
+import RegisterScreen from './src/screens/RegisterScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import OTPVerificationScreen from './src/screens/OTPVerificationScreen';
 import HomeScreen from './src/screens/HomeScreen';
@@ -12,9 +19,11 @@ import OrdersScreen from './src/screens/OrdersScreen';
 import OrderDetailsScreen, { Order } from './src/screens/OrderDetailsScreen';
 import CartScreen from './src/screens/CartScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
+import { addToCart as addToCartAction, clearCart, fetchCartIfNeeded, mergeQuantities, removeFromCart as removeFromCartAction, selectCartCount, selectCartQuantities } from './src/store/slices/cartSlice';
 import SearchScreen from './src/screens/SearchScreen';
 import MyOrdersScreen from './src/screens/MyOrdersScreen';
 import SavedAddressesScreen from './src/screens/SavedAddressesScreen';
+import AddAddressScreen from './src/screens/AddAddressScreen';
 import PaymentMethodsScreen from './src/screens/PaymentMethodsScreen';
 import HelpSupportScreen from './src/screens/HelpSupportScreen';
 import PrivacyPolicyScreen from './src/screens/PrivacyPolicyScreen';
@@ -26,19 +35,44 @@ import OrderTrackingScreen from './src/screens/OrderTrackingScreen';
 import RationKitsScreen from './src/screens/RationKitsScreen';
 import TabBar, { TabName } from './src/components/TabBar';
 import Toast from './src/components/Toast';
-import { Product } from './src/data/categoryData';
+import { Product } from './src/services/ProductsService';
 
-type Screen = 'splash' | 'login' | 'otp' | 'home' | 'subCategory' | 'categories' | 'orders' | 'orderDetails' | 'cart' | 'profile' | 'search' | 'myOrders' | 'savedAddresses' | 'paymentMethods' | 'helpSupport' | 'privacyPolicy' | 'termsConditions' | 'productDetail' | 'checkout' | 'orderReceived' | 'orderTracking' | 'rationKits';
+type Screen = 'splash' | 'authChoice' | 'login' | 'register' | 'otp' | 'home' | 'subCategory' | 'categories' | 'orders' | 'orderDetails' | 'cart' | 'profile' | 'search' | 'myOrders' | 'savedAddresses' | 'addAddress' | 'paymentMethods' | 'helpSupport' | 'privacyPolicy' | 'termsConditions' | 'productDetail' | 'checkout' | 'orderReceived' | 'orderTracking' | 'rationKits';
 
-export default function App() {
+function AppContent() {
+  const dispatch = useAppDispatch();
+  const { isAuthenticated, isLoading } = useAppSelector((state) => state.auth);
   const [screenHistory, setScreenHistory] = useState<Screen[]>(['splash']);
+  const [splashFinished, setSplashFinished] = useState(false);
   const currentScreen = screenHistory[screenHistory.length - 1];
 
-  const navigateTo = (screen: Screen) =>
-    setScreenHistory((prev) => [...prev, screen]);
+  useEffect(() => {
+    apiClient.setAuthFailureHandler(() => {
+      console.log('[AUTH] API auth failure detected, clearing auth + cart state');
+      dispatch(clearAuth());
+      dispatch(clearCart());
+    });
+  }, [dispatch]);
+
+  const navigateTo = (screen: Screen | string) =>
+    setScreenHistory((prev) => [...prev, screen as Screen]);
 
   const goBack = () =>
     setScreenHistory((prev) => (prev.length > 1 ? prev.slice(0, -1) : prev));
+
+  // Handle navigation based on auth state change
+  useEffect(() => {
+    if (splashFinished && !isLoading) {
+      console.log('[NAV] Auth state:', { isAuthenticated, isLoading });
+      if (isAuthenticated) {
+        console.log('[NAV] User authenticated, navigating to home');
+        setScreenHistory(['home']);
+      } else {
+        console.log('[NAV] User not authenticated, navigating to authChoice');
+        setScreenHistory(['authChoice']);
+      }
+    }
+  }, [isAuthenticated, isLoading, splashFinished]);
 
   useEffect(() => {
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -58,7 +92,17 @@ export default function App() {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
-  const [cartState, setCartState] = useState<Record<string, number>>({});
+
+  const cartState = useAppSelector(selectCartQuantities);
+  const cartCount = useAppSelector(selectCartCount);
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      dispatch(fetchCartIfNeeded());
+    } else {
+      dispatch(clearCart());
+    }
+  }, [dispatch, isAuthenticated]);
 
   // Screen transition animation
   const fadeAnim  = useRef(new Animated.Value(1)).current;
@@ -72,27 +116,20 @@ export default function App() {
       Animated.spring(slideAnim, { toValue: 0, useNativeDriver: true, damping: 22, stiffness: 200 }),
     ]).start();
   }, [currentScreen]);
-  const addToCart = (productId: string) => {
-    setCartState((prev) => ({ ...prev, [productId]: (prev[productId] ?? 0) + 1 }));
+  const addToCart = (variantId: string) => {
+    dispatch(addToCartAction({ variantId, quantity: 1 }));
   };
 
-  const removeFromCart = (productId: string) =>
-    setCartState((prev) => {
-      const qty = (prev[productId] ?? 0) - 1;
-      if (qty <= 0) {
-        const next = { ...prev };
-        delete next[productId];
-        return next;
-      }
-      return { ...prev, [productId]: qty };
-    });
+  const removeFromCart = (variantId: string) => {
+    dispatch(removeFromCartAction(variantId));
+  };
 
   const handleReorder = (order: Order) => {
-    const newCartState: Record<string, number> = { ...cartState };
-    order.items.forEach(item => {
-      newCartState[item.id] = (newCartState[item.id] ?? 0) + item.quantity;
-    });
-    setCartState(newCartState);
+    dispatch(
+      mergeQuantities(
+        order.items.map((item) => ({ variantId: item.id, quantity: Number(item.quantity) }))
+      )
+    );
     setScreenHistory(['cart']);
   };
 
@@ -105,16 +142,21 @@ export default function App() {
 
   const showTabBar = ['home', 'subCategory', 'categories', 'orders', 'cart'].includes(currentScreen);
 
-  const cartCount = Object.values(cartState).reduce((s, q) => s + q, 0);
   const showCartToast = cartCount > 0 && ['home', 'subCategory', 'categories', 'productDetail'].includes(currentScreen);
 
   const handleSplashFinish = () => {
-    setScreenHistory(['login']);
+    console.log('[SPLASH] Splash animation finished, waiting for auth state');
+    setSplashFinished(true);
   };
 
-  const handleLoginSuccess = (phone: string) => {
-    setPhoneNumber(phone);
-    navigateTo('otp');
+  const handleLoginSuccess = () => {
+    setScreenHistory(['home']);
+    console.log('User logged in successfully!');
+  };
+
+  const handleRegisterSuccess = () => {
+    setScreenHistory(['home']);
+    console.log('User registered and authenticated successfully!');
   };
 
   const handleOtpVerifySuccess = () => {
@@ -130,6 +172,15 @@ export default function App() {
     switch (currentScreen) {
       case 'splash':
         return <SplashScreen onFinish={handleSplashFinish} />;
+      case 'authChoice':
+        return <AuthChoiceScreen onNavigateTo={navigateTo} />;
+      case 'register':
+        return (
+          <RegisterScreen
+            onRegisterSuccess={handleRegisterSuccess}
+            onGoBack={handleGoBack}
+          />
+        );
       case 'login':
         return <LoginScreen onLoginSuccess={handleLoginSuccess} />;
       case 'otp':
@@ -151,6 +202,7 @@ export default function App() {
             onProfilePress={() => navigateTo('profile')}
             onCartPress={() => navigateTo('cart')}
             onRationKitsPress={() => navigateTo('rationKits')}
+            onAddAddressPress={() => navigateTo('addAddress')}
             cartState={cartState}
             onAddToCart={addToCart}
             onRemoveFromCart={removeFromCart}
@@ -203,7 +255,6 @@ export default function App() {
         return (
           <CartScreen
             onGoBack={goBack}
-            cartState={cartState}
             onAddToCart={addToCart}
             onRemoveFromCart={removeFromCart}
             onCheckout={(total) => { setCheckoutTotal(total); navigateTo('checkout'); }}
@@ -214,13 +265,18 @@ export default function App() {
           <ProfileScreen
             onGoBack={goBack}
             onNavigate={(screen) => navigateTo(screen as Screen)}
-            onSignOut={() => setScreenHistory(['login'])}
+            onSignOut={async () => {
+              await dispatch(logoutUser());
+              setScreenHistory(['authChoice']);
+            }}
           />
         );
       case 'myOrders':
         return <MyOrdersScreen onGoBack={goBack} />;
       case 'savedAddresses':
-        return <SavedAddressesScreen onGoBack={goBack} />;
+        return <SavedAddressesScreen onGoBack={goBack} onNavigate={navigateTo} />;
+      case 'addAddress':
+        return <AddAddressScreen onGoBack={goBack} onSuccess={() => { goBack(); }} />;
       case 'paymentMethods':
         return <PaymentMethodsScreen onGoBack={goBack} />;
       case 'helpSupport':
@@ -233,7 +289,6 @@ export default function App() {
         return selectedProduct ? (
           <ProductDetailScreen
             product={selectedProduct}
-            categoryName={selectedCategory}
             cartState={cartState}
             onAddToCart={addToCart}
             onRemoveFromCart={removeFromCart}
@@ -244,11 +299,12 @@ export default function App() {
         return (
           <CheckoutScreen
             total={checkoutTotal}
+            cartState={cartState}
             onGoBack={goBack}
             onOrderPlaced={(orderId) => {
               setCurrentOrderId(orderId);
-              setCartState({});
-              setScreenHistory((prev) => [...prev.filter(s => s !== 'cart' && s !== 'checkout'), 'orderReceived']);
+              dispatch(clearCart());
+              setScreenHistory((prev) => [...prev.filter((s) => s !== 'cart' && s !== 'checkout'), 'orderReceived']);
             }}
           />
         );
@@ -274,11 +330,8 @@ export default function App() {
           <RationKitsScreen
             onGoBack={goBack}
             onAddKitToCart={(kit) => {
-              const newCartState: Record<string, number> = { ...cartState };
-              kit.items.forEach(item => {
-                newCartState[item.id] = (newCartState[item.id] ?? 0) + 1;
-              });
-              setCartState(newCartState);
+              const payload = kit.items.map((item) => ({ variantId: item.id, quantity: 1 }));
+              dispatch(mergeQuantities(payload));
               navigateTo('cart');
             }}
           />
@@ -340,3 +393,11 @@ const appStyles = StyleSheet.create({
     flex: 1,
   },
 });
+
+export default function App() {
+  return (
+    <Provider store={store}>
+      <AppContent />
+    </Provider>
+  );
+}

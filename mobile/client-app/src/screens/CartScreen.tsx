@@ -1,33 +1,41 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AddButton from '../components/AddButton';
-import { getProduct } from '../data/productRegistry';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchCartIfNeeded, selectCartItems } from '../store/slices/cartSlice';
 
 interface Props {
-  cartState: Record<string, number>;
   onAddToCart: (productId: string) => void;
   onRemoveFromCart: (productId: string) => void;
   onCheckout?: (total: number) => void;
   onGoBack?: () => void;
 }
 
-export default function CartScreen({ cartState, onAddToCart, onRemoveFromCart, onCheckout, onGoBack }: Props) {
-  // Build cart items dynamically from cartState + product registry
-  const activeItems = Object.entries(cartState)
-    .filter(([, qty]) => qty > 0)
-    .map(([id, qty]) => {
-      const meta = getProduct(id);
-      return {
-        id,
-        qty,
-        name:   meta?.name   ?? id,
-        brand:  meta?.brand  ?? '',
-        weight: meta?.weight ?? '',
-        price:  meta?.price  ?? 0,
-        emoji:  meta?.emoji  ?? '📦',
-      };
+export default function CartScreen({ onAddToCart, onRemoveFromCart, onCheckout, onGoBack }: Props) {
+  const dispatch = useAppDispatch();
+  const cartItems = useAppSelector(selectCartItems);
+  const [loading, setLoading] = useState(true);
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    let mounted = true;
+    setLoading(true);
+    Promise.resolve(dispatch(fetchCartIfNeeded())).finally(() => {
+      if (mounted) setLoading(false);
     });
+    return () => { mounted = false; };
+  }, [dispatch]);
+
+  const activeItems = cartItems.map((item) => ({
+    id: item.variantId,
+    qty: item.quantity,
+    name: item.variant.product.name,
+    brand: item.variant.sku,
+    weight: `${item.variant.unitValue} ${item.variant.unitLabel}`,
+    price: Number(item.variant.sellingPrice),
+    imageUrl: item.variant.product.images?.[0] || null,
+  }));
 
   const subtotal = activeItems.reduce((sum, i) => sum + i.price * i.qty, 0);
   const deliveryFee = subtotal > 0 ? 19 : 0;
@@ -49,7 +57,11 @@ export default function CartScreen({ cartState, onAddToCart, onRemoveFromCart, o
         </View>
       </View>
 
-      {activeItems.length === 0 ? (
+      {loading ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyTitle}>Loading cart…</Text>
+        </View>
+      ) : activeItems.length === 0 ? (
         <View style={styles.emptyState}>
           <MaterialCommunityIcons name="cart-outline" size={72} color="#ccc" />
           <Text style={styles.emptyTitle}>Your cart is empty</Text>
@@ -69,7 +81,16 @@ export default function CartScreen({ cartState, onAddToCart, onRemoveFromCart, o
           {activeItems.map((item) => (
             <View key={item.id} style={styles.itemCard}>
               <View style={styles.itemImageBox}>
-                <Text style={styles.itemEmoji}>{item.emoji}</Text>
+                {imageErrors[item.id] || !item.imageUrl ? (
+                  <MaterialCommunityIcons name="package-variant" size={36} color="#999" />
+                ) : (
+                  <Image
+                    source={{ uri: item.imageUrl }}
+                    style={styles.itemImage}
+                    resizeMode="cover"
+                    onError={() => setImageErrors((prev) => ({ ...prev, [item.id]: true }))}
+                  />
+                )}
               </View>
               <View style={styles.itemDetails}>
                 <Text style={styles.itemName}>{item.name}</Text>
@@ -187,6 +208,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
+  },
+  itemImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
   },
   itemEmoji:   { fontSize: 28 },
   itemDetails: { flex: 1 },

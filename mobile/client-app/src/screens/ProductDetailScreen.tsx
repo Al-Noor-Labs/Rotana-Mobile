@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, Image,
 } from 'react-native';
-import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
-import { getDataForCategory, getProductImage, Product, SubCat } from '../data/categoryData';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAppSelector } from '../store/hooks';
+import { Product } from '../services/ProductsService';
+import { formatProductForDisplay } from '../utils/productFormatter';
 import AddButton from '../components/AddButton';
 
 const BG_COLORS = [
@@ -11,8 +13,8 @@ const BG_COLORS = [
   '#F3E5F5', '#FFF9C4', '#FFEBEE', '#E0F7FA',
 ];
 
-function getBg(subCatId: number) {
-  return BG_COLORS[subCatId % BG_COLORS.length];
+function getBg(id: number) {
+  return BG_COLORS[id.charCodeAt(0) % BG_COLORS.length];
 }
 
 function StarRow({ rating }: { rating: number }) {
@@ -33,7 +35,6 @@ function StarRow({ rating }: { rating: number }) {
 
 interface Props {
   product: Product;
-  categoryName: string;
   cartState: Record<string, number>;
   onAddToCart: (id: string) => void;
   onRemoveFromCart: (id: string) => void;
@@ -55,40 +56,32 @@ const HIGHLIGHTS = [
   { icon: 'leaf-circle-outline',    text: 'Freshness Assured'        },
 ];
 
-function RelatedProductImage({ p, relSub }: { p: Product; relSub?: SubCat }) {
-  const [err, setErr] = useState(false);
-  if (!err) {
-    return (
-      <Image
-        source={{ uri: getProductImage(p) }}
-        style={styles.relatedImgPhoto}
-        resizeMode="cover"
-        onError={() => setErr(true)}
-      />
-    );
-  }
-  return relSub?.iconLib === 'ion'
-    ? <Ionicons name={relSub.icon as any} size={36} color="#666" />
-    : <MaterialCommunityIcons name={(relSub?.icon ?? 'package-variant-closed') as any} size={36} color="#666" />;
-}
-
 export default function ProductDetailScreen({
   product,
-  categoryName,
   cartState,
   onAddToCart,
   onRemoveFromCart,
   onGoBack,
 }: Props) {
-  const { subs, products } = getDataForCategory(categoryName);
-  const sub = subs.find((s: SubCat) => s.id === product.subCatId);
-  const bgColor = getBg(product.subCatId);
-  const qty = cartState[String(product.id)] ?? 0;
+  const { products: apiProducts } = useAppSelector((state) => state.products);
   const [wishlist, setWishlist] = useState(false);
   const [mainImgErr, setMainImgErr] = useState(false);
+  const [relatedImgErrs, setRelatedImgErrs] = useState<Record<string, boolean>>({});
 
-  const related = products
-    .filter((p: Product) => p.subCatId === product.subCatId && p.id !== product.id)
+  if (!product.variants || product.variants.length === 0) {
+    return <View style={styles.container}><Text>Product not available</Text></View>;
+  }
+
+  const variant = product.variants[0];
+  const stock = product.inventoryBalances?.[0]?.available || 0;
+  const discount = Math.round(((variant.mrp - variant.sellingPrice) / variant.mrp) * 100);
+  const weight = `${variant.unitValue} ${variant.unitLabel}`;
+  const bgColor = getBg(product.id);
+  const qty = cartState[variant.id] ?? 0;
+
+  // Related products from same category
+  const related = apiProducts
+    .filter((p) => p.category?.name === product.category?.name && p.id !== product.id)
     .slice(0, 6);
 
   return (
@@ -107,63 +100,65 @@ export default function ProductDetailScreen({
       <ScrollView style={styles.scroll} showsVerticalScrollIndicator={false}>
         {/* Image area */}
         <View style={[styles.imageArea, { backgroundColor: bgColor }]}>
-          {product.discount > 0 && (
+          {discount > 0 && (
             <View style={styles.discountBadge}>
-              <Text style={styles.discountBadgeText}>{product.discount}% OFF</Text>
+              <Text style={styles.discountBadgeText}>{discount}% OFF</Text>
             </View>
           )}
-          {mainImgErr ? (
+          {mainImgErr || !product.imageUrl ? (
             <View style={styles.iconCircle}>
-              {sub?.iconLib === 'ion'
-                ? <Ionicons name={sub.icon as any} size={64} color="#555" />
-                : <MaterialCommunityIcons name={(sub?.icon ?? 'package-variant-closed') as any} size={64} color="#555" />
-              }
+              <MaterialCommunityIcons name="package-variant-closed" size={64} color="#555" />
             </View>
           ) : (
             <Image
-              source={{ uri: getProductImage(product) }}
+              source={{ uri: product.imageUrl }}
               style={styles.mainProductImg}
               resizeMode="cover"
               onError={() => setMainImgErr(true)}
             />
           )}
-          <Text style={styles.weightBadge}>{product.weight}</Text>
+          <Text style={styles.weightBadge}>{weight}</Text>
         </View>
 
         {/* Product Info */}
         <View style={styles.infoCard}>
           <View style={styles.deliveryRowTop}>
             <MaterialCommunityIcons name="clock-fast" size={14} color="#0C831F" />
-            <Text style={styles.deliveryText}> {product.delivery} delivery</Text>
-            {product.stock <= 5 && (
+            <Text style={styles.deliveryText}> 12-15 mins delivery</Text>
+            {stock <= 5 && stock > 0 && (
               <View style={styles.stockBadge}>
-                <Text style={styles.stockText}>Only {product.stock} left!</Text>
+                <Text style={styles.stockText}>Only {stock} left!</Text>
+              </View>
+            )}
+            {stock === 0 && (
+              <View style={styles.stockBadge}>
+                <Text style={styles.stockText}>Out of Stock</Text>
               </View>
             )}
           </View>
 
           <Text style={styles.productName}>{product.name}</Text>
-          <Text style={styles.brandText}>{product.brand}  ·  {product.weight}</Text>
+          <Text style={styles.brandText}>{product.brand}  ·  {weight}</Text>
 
           <View style={styles.ratingRow}>
-            <StarRow rating={product.rating} />
-            <Text style={styles.reviewsText}>  {product.reviews} ratings</Text>
+            <StarRow rating={4} />
+            <Text style={styles.reviewsText}>  128 ratings</Text>
           </View>
 
           <View style={styles.priceRow}>
-            <Text style={styles.price}>₹{product.price}</Text>
-            <Text style={styles.mrp}>MRP ₹{product.mrp}</Text>
-            <Text style={styles.unit}>{product.unit}</Text>
+            <Text style={styles.price}>₹{variant.sellingPrice}</Text>
+            <Text style={styles.mrp}>MRP ₹{variant.mrp}</Text>
           </View>
 
           {/* Add to Cart */}
           <View style={styles.addRow}>
             <AddButton
-              productId={String(product.id)}
+              productId={variant.id}
               quantity={qty}
               onAdd={onAddToCart}
               onRemove={onRemoveFromCart}
               size="md"
+              disabled={stock === 0}
             />
           </View>
         </View>
@@ -193,9 +188,9 @@ export default function ProductDetailScreen({
           <View style={styles.specTable}>
             {[
               ['Brand', product.brand],
-              ['Weight / Volume', product.weight],
-              ['Price per unit', product.unit],
-              ['Stock', `${product.stock} units available`],
+              ['Weight / Volume', weight],
+              ['Price per unit', `₹${variant.sellingPrice}`],
+              ['Stock', stock === 0 ? 'Out of Stock' : `${stock} units available`],
             ].map(([k, v]) => (
               <View key={k} style={styles.specRow}>
                 <Text style={styles.specKey}>{k}</Text>
@@ -210,29 +205,44 @@ export default function ProductDetailScreen({
           <View style={styles.relatedSection}>
             <Text style={styles.sectionTitle}>More from this category</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.relatedScroll}>
-              {related.map((p: Product) => {
-                const relQty = cartState[String(p.id)] ?? 0;
-                const relSub = subs.find((s: SubCat) => s.id === p.subCatId);
+              {related.map((p) => {
+                const formatted = formatProductForDisplay(p);
+                if (!formatted) return null;
+                const relQty = cartState[formatted.variantId] ?? 0;
+                const relBg = getBg(p.id);
+                const relImgErr = relatedImgErrs[p.id] || false;
                 return (
                   <View key={p.id} style={styles.relatedCard}>
-                    <View style={[styles.relatedImg, { backgroundColor: getBg(p.subCatId) }]}>
-                      <RelatedProductImage p={p} relSub={relSub} />
-                      {p.discount > 0 && (
+                    <View style={[styles.relatedImg, { backgroundColor: relBg }]}>
+                      {relImgErr || !p.imageUrl ? (
+                        <View style={styles.relatedImgPlaceholder}>
+                          <MaterialCommunityIcons name="package-variant-closed" size={36} color="#666" />
+                        </View>
+                      ) : (
+                        <Image
+                          source={{ uri: p.imageUrl }}
+                          style={styles.relatedImgPhoto}
+                          resizeMode="cover"
+                          onError={() => setRelatedImgErrs((prev) => ({ ...prev, [p.id]: true }))}
+                        />
+                      )}
+                      {formatted.discount > 0 && (
                         <View style={styles.relatedDiscBadge}>
-                          <Text style={styles.relatedDiscText}>{p.discount}%</Text>
+                          <Text style={styles.relatedDiscText}>{formatted.discount}%</Text>
                         </View>
                       )}
                     </View>
                     <View style={styles.relatedInfo}>
                       <Text style={styles.relatedName} numberOfLines={2}>{p.name}</Text>
-                      <Text style={styles.relatedWeight}>{p.weight}</Text>
-                      <Text style={styles.relatedPrice}>₹{p.price}</Text>
+                      <Text style={styles.relatedWeight}>{formatted.weight}</Text>
+                      <Text style={styles.relatedPrice}>₹{formatted.price}</Text>
                       <AddButton
-                        productId={String(p.id)}
+                        productId={formatted.variantId}
                         quantity={relQty}
                         onAdd={onAddToCart}
                         onRemove={onRemoveFromCart}
                         size="sm"
+                        disabled={formatted.isOutOfStock}
                       />
                     </View>
                   </View>
@@ -317,7 +327,6 @@ const styles = StyleSheet.create({
   priceRow: { flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 14 },
   price: { fontSize: 24, fontWeight: '900', color: '#111' },
   mrp: { fontSize: 14, color: '#999', textDecorationLine: 'line-through' },
-  unit: { fontSize: 12, color: '#888' },
   addRow: { alignItems: 'flex-start' },
 
   highlightsCard: {
@@ -361,6 +370,10 @@ const styles = StyleSheet.create({
   relatedImgPhoto: {
     width: '100%',
     height: '100%',
+  },
+  relatedImgPlaceholder: {
+    width: '100%', height: '100%',
+    justifyContent: 'center', alignItems: 'center',
   },
   relatedDiscBadge: {
     position: 'absolute', top: 5, right: 5,

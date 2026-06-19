@@ -1,43 +1,106 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAppSelector } from '../store/hooks';
+import { apiClient } from '../services/ApiClient';
+import { ordersService } from '../services/OrdersService';
+import { CreateOrderRequest } from '../types/orders.types';
+import { formatProductForDisplay } from '../utils/productFormatter';
 
 const PURPLE = '#5B2D8E';
 
 const PAYMENT_METHODS = [
-  { id: 'upi',     label: 'UPI',                  subLabel: 'Pay via any UPI app',         icon: 'contactless-payment',  color: '#1A237E' },
-  { id: 'gpay',    label: 'Google Pay',            subLabel: 'Fast & secure payments',      icon: 'google',               color: '#4285F4' },
-  { id: 'phonepe', label: 'PhonePe',               subLabel: 'UPI powered by PhonePe',      icon: 'cellphone',            color: '#5F259F' },
-  { id: 'paytm',   label: 'Paytm',                 subLabel: 'Paytm Wallet or UPI',         icon: 'wallet-outline',       color: '#00B9F1' },
-  { id: 'card',    label: 'Credit / Debit Card',   subLabel: 'Visa, Mastercard, RuPay',     icon: 'credit-card-outline',  color: '#E65100' },
-  { id: 'cod',     label: 'Cash on Delivery',      subLabel: 'Pay when your order arrives', icon: 'cash-multiple',        color: '#0C831F' },
+  { id: 'upi',     label: 'UPI',                  subLabel: 'Pay via any UPI app',         icon: 'contactless-payment',  color: '#1A237E', apiValue: 'UPI' },
+  { id: 'gpay',    label: 'Google Pay',            subLabel: 'Fast & secure payments',      icon: 'google',               color: '#4285F4', apiValue: 'UPI' },
+  { id: 'phonepe', label: 'PhonePe',               subLabel: 'UPI powered by PhonePe',      icon: 'cellphone',            color: '#5F259F', apiValue: 'UPI' },
+  { id: 'paytm',   label: 'Paytm',                 subLabel: 'Paytm Wallet or UPI',         icon: 'wallet-outline',       color: '#00B9F1', apiValue: 'WALLET' },
+  { id: 'card',    label: 'Credit / Debit Card',   subLabel: 'Visa, Mastercard, RuPay',     icon: 'credit-card-outline',  color: '#E65100', apiValue: 'CARD' },
+  { id: 'cod',     label: 'Cash on Delivery',      subLabel: 'Pay when your order arrives', icon: 'cash-multiple',        color: '#0C831F', apiValue: 'CASH' },
 ];
 
 interface Props {
   total: number;
+  cartState: Record<string, number>;
   onGoBack: () => void;
   onOrderPlaced: (orderId: string) => void;
 }
 
-export default function CheckoutScreen({ total, onGoBack, onOrderPlaced }: Props) {
+export default function CheckoutScreen({ total, cartState, onGoBack, onOrderPlaced }: Props) {
   const [selected, setSelected] = useState('cod');
   const [placing, setPlacing]   = useState(false);
+  const { products: allProducts } = useAppSelector((state) => state.products);
+  const { user } = useAppSelector((state) => state.auth);
+
+  console.log('[CHECKOUT] Current user:', user);
+  console.log('[CHECKOUT] User role:', user?.role);
 
   const deliveryFee = 19;
-  // Reverse calculate from total (which includes GST + Tax)
   const subtotalWithDelivery = total - deliveryFee;
-  const baseSubtotal = Math.round(subtotalWithDelivery / 1.08); // Remove 8% (5% GST + 3% Tax)
+  const baseSubtotal = Math.round(subtotalWithDelivery / 1.08);
   const gst = Math.round(baseSubtotal * 0.05);
   const tax = Math.round(baseSubtotal * 0.03);
   const subtotal = baseSubtotal;
 
-  const handlePlaceOrder = () => {
-    setPlacing(true);
-    setTimeout(() => {
-      const orderId = 'ORD-' + Math.floor(10000 + Math.random() * 90000);
+  const handlePlaceOrder = async () => {
+    try {
+      setPlacing(true);
+
+      // Debug: Check if token exists
+      const { secureStorage } = await import('../services/SecureStorageService');
+      const token = await secureStorage.getAccessToken();
+      const user = await secureStorage.getUser();
+      console.log('[CHECKOUT] Token exists:', !!token);
+      console.log('[CHECKOUT] User:', user);
+      console.log('[CHECKOUT] User role:', user?.role);
+
+      if (!token) {
+        Alert.alert('Authentication Error', 'Please log in to place an order');
+        setPlacing(false);
+        return;
+      }
+
+      // Test if token works with products endpoint
+      console.log('[CHECKOUT] Testing token with /api/v1/products...');
+      const testResponse = await apiClient.get('/api/v1/products?limit=1');
+      console.log('[CHECKOUT] Products test response:', testResponse.success ? 'SUCCESS' : 'FAILED');
+      if (!testResponse.success) {
+        Alert.alert('Auth Error', 'Token is invalid or expired. Please log in again.');
+        setPlacing(false);
+        return;
+      }
+
+      // Build cart items for the order
+      const orderItems = Object.entries(cartState)
+        .filter(([, qty]) => qty > 0)
+        .map(([variantId, quantity]) => {
+          const product = allProducts.find((p) =>
+            p.variants?.some((v) => v.id === variantId)
+          );
+          const variant = product?.variants?.find((v) => v.id === variantId);
+          return {
+            variantId,
+            quantity,
+            price: Number(variant?.sellingPrice) || 0, // ✅ Convert to number
+          };
+        });
+
+      const orderRequest: CreateOrderRequest = {
+        items: orderItems,
+        paymentMethod: PAYMENT_METHODS.find(pm => pm.id === selected)?.apiValue || 'CASH',
+        orderType: 'B2C_ONLINE',
+        // customerId is auto-set by backend for CUSTOMER role - don't send it
+        // sourceLocationId defaults to primary warehouse for customers
+        // discountAmount is forced to 0 for customers
+      };
+
+      const order = await ordersService.createOrder(orderRequest);
+      onOrderPlaced(order.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to place order';
+      console.error('[CHECKOUT] Order placement error:', message);
+      Alert.alert('Error', message);
       setPlacing(false);
-      onOrderPlaced(orderId);
-    }, 1500);
+    }
   };
 
   return (
