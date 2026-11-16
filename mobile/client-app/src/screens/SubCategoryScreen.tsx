@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,10 @@ import {
   Image,
 } from 'react-native';
 import { MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
-import { getDataForCategory, getProductImage, SubCat, Product } from '../data/categoryData';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchProductsByCategory } from '../store/slices/productsSlice';
+import { Product as ApiProduct } from '../services/ProductsService';
+import { formatProductForDisplay, FormattedProduct } from '../utils/productFormatter';
 import AddButton from '../components/AddButton';
 
 const BG_COLORS = [
@@ -36,7 +39,7 @@ interface Props {
   categoryName?: string;
   onGoBack: () => void;
   onSearchPress?: () => void;
-  onProductPress?: (product: Product) => void;
+  onProductPress?: (product: ApiProduct) => void;
   cartState: Record<string, number>;
   onAddToCart: (productId: string) => void;
   onRemoveFromCart: (productId: string) => void;
@@ -73,31 +76,27 @@ function ProductCard({
   qty,
   onAdd,
   onRemove,
-  sub,
   onPress,
 }: {
-  product: Product;
+  product: FormattedProduct;
   qty: number;
   onAdd: (id: string) => void;
   onRemove: (id: string) => void;
-  sub?: SubCat;
   onPress?: () => void;
 }) {
-  const bgColor = getBg(product.subCatId);
+  const bgColor = BG_COLORS[Math.random() * BG_COLORS.length | 0];
   const [imgErr, setImgErr] = useState(false);
+
   return (
     <TouchableOpacity style={styles.card} activeOpacity={0.88} onPress={onPress}>
       <View style={[styles.imageArea, { backgroundColor: bgColor }]}>
-        {imgErr ? (
+        {imgErr || !product.imageUrl ? (
           <View style={styles.imgIconCircle}>
-            {sub?.iconLib === 'ion'
-              ? <Ionicons name={sub.icon as any} size={44} color="#555" />
-              : <MaterialCommunityIcons name={(sub?.icon ?? 'package-variant-closed') as any} size={44} color="#555" />
-            }
+            <MaterialCommunityIcons name="package-variant-closed" size={44} color="#555" />
           </View>
         ) : (
           <Image
-            source={{ uri: getProductImage(product) }}
+            source={{ uri: product.imageUrl }}
             style={styles.productImg}
             resizeMode="cover"
             onError={() => setImgErr(true)}
@@ -122,19 +121,16 @@ function ProductCard({
         <Text style={styles.productName} numberOfLines={2}>{product.name}</Text>
         <Text style={styles.brandText}>{product.brand}</Text>
 
-        <StarRow rating={product.rating} />
-        <Text style={styles.reviewCount}>({product.reviews})</Text>
-
-        <View style={styles.deliveryRow}>
-          <MaterialCommunityIcons name="clock-fast" size={12} color="#5B2D8E" />
-          <Text style={styles.deliveryText}> {product.delivery}</Text>
-        </View>
-
-        {product.stock <= 5 && (
+        {product.isOutOfStock && (
+          <Text style={styles.stockText}>Out of Stock</Text>
+        )}
+        {!product.isOutOfStock && product.stock <= 5 && (
           <Text style={styles.stockText}>Only {product.stock} left</Text>
         )}
 
-        <Text style={styles.discountText}>{product.discount}% OFF</Text>
+        {product.discount > 0 && (
+          <Text style={styles.discountText}>{product.discount}% OFF</Text>
+        )}
 
         <View style={styles.priceAddRow}>
           <View style={{ flex: 1, marginRight: 6 }}>
@@ -142,14 +138,14 @@ function ProductCard({
               <Text style={styles.price} numberOfLines={1}>₹{product.price}</Text>
               <Text style={styles.mrp} numberOfLines={1}> MRP ₹{product.mrp}</Text>
             </View>
-            <Text style={styles.priceUnit}>{product.unit}</Text>
           </View>
           <AddButton
-            productId={String(product.id)}
+            productId={product.variantId}
             quantity={qty}
             onAdd={onAdd}
             onRemove={onRemove}
             size="sm"
+            disabled={product.isOutOfStock}
           />
         </View>
       </View>
@@ -160,7 +156,7 @@ function ProductCard({
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function SubCategoryScreen({
-  categoryName = 'Oil & Masala',
+  categoryName = 'Staples & Grains',
   onGoBack,
   onSearchPress,
   onProductPress,
@@ -168,23 +164,71 @@ export default function SubCategoryScreen({
   onAddToCart,
   onRemoveFromCart,
 }: Props) {
-  const { subs, products } = getDataForCategory(categoryName);
-  const [selectedId, setSelectedId] = useState(subs[0]?.id ?? 0);
+  const dispatch = useAppDispatch();
+  const { products: apiProducts, isLoading: productsLoading } = useAppSelector((state) => state.products);
+  const { categories: apiCategories } = useAppSelector((state) => state.categories);
+  const [selectedSubCategory, setSelectedSubCategory] = useState<string | null>(null);
+
+  // Find parent category and extract subcategories from flat list
+  const parentCategory = apiCategories.find((cat) => cat.name === categoryName);
+  const parentCategoryId = parentCategory?.id;
+
+  // Extract all sub-categories that have this parent (using parentId field)
+  const subCategories = parentCategoryId
+    ? apiCategories.filter((cat) => cat.parentId === parentCategoryId)
+    : [];
+
+  // Fetch products for this category when component mounts or category changes
+  useEffect(() => {
+    console.log('[SUBCATEGORY] Mount:', { categoryName, parentCategoryId, categoriesCount: apiCategories.length });
+
+    if (!parentCategoryId) {
+      console.warn('[SUBCATEGORY] parentCategoryId is undefined! Categories available:', apiCategories.map(c => ({ name: c.name, id: c.id })));
+      return;
+    }
+
+    const subCategoryIds = subCategories.map((s) => s.id);
+    const allCategoryIds = [parentCategoryId, ...subCategoryIds];
+
+    console.log('[SUBCATEGORY] Fetching products for category:', categoryName, 'IDs:', allCategoryIds);
+    dispatch(fetchProductsByCategory(allCategoryIds));
+  }, [parentCategoryId, categoryName, dispatch, apiCategories, subCategories.length]);
+
+  // Get all valid category names for this parent (main category + all sub-categories)
+  const validCategoryNames = new Set<string>();
+  if (parentCategory) validCategoryNames.add(parentCategory.name);
+  subCategories.forEach(sub => validCategoryNames.add(sub.name));
+
+  // Filter products by matching any of the valid category names
+  const filteredProducts = apiProducts
+    .filter((p) => validCategoryNames.has(p.category?.name || ''))
+    .filter((p) => {
+      // If a subcategory is selected, filter by it specifically
+      if (selectedSubCategory) {
+        return p.category?.name === selectedSubCategory;
+      }
+      return true;
+    })
+    .map((p) => formatProductForDisplay(p))
+    .filter((p) => p !== null) as FormattedProduct[];
+
   const [filterVisible, setFilterVisible] = useState(false);
-  const [sortVisible,   setSortVisible]   = useState(false);
-  const [selectedSort,  setSelectedSort]  = useState('Relevance');
-  const [activeBrands,  setActiveBrands]  = useState<string[]>([]);
-  const [activeDisc,    setActiveDisc]    = useState<string[]>([]);
-  const [activePrice,   setActivePrice]   = useState<string[]>([]);
+  const [sortVisible, setSortVisible] = useState(false);
+  const [selectedSort, setSelectedSort] = useState('Relevance');
+  const [activeBrands, setActiveBrands] = useState<string[]>([]);
+  const [activeDisc, setActiveDisc] = useState<string[]>([]);
+  const [activePrice, setActivePrice] = useState<string[]>([]);
 
   const toggleBrand = (b: string) => setActiveBrands((prev) => prev.includes(b) ? prev.filter(x => x !== b) : [...prev, b]);
-  const toggleDisc  = (d: string) => setActiveDisc((prev)  => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
+  const toggleDisc = (d: string) => setActiveDisc((prev) => prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]);
   const togglePrice = (p: string) => setActivePrice((prev) => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]);
   const totalActive = activeBrands.length + activeDisc.length + activePrice.length;
 
-  const filtered = products.filter((p) => p.subCatId === selectedId);
-  const rows: Product[][] = [];
-  for (let i = 0; i < filtered.length; i += 2) rows.push(filtered.slice(i, i + 2));
+  // Create rows for 2-column layout
+  const rows: FormattedProduct[][] = [];
+  for (let i = 0; i < filteredProducts.length; i += 2) {
+    rows.push(filteredProducts.slice(i, i + 2));
+  }
 
   return (
     <View style={styles.container}>
@@ -241,41 +285,97 @@ export default function SubCategoryScreen({
 
       {/* ── Body ── */}
       <View style={styles.body}>
-        {/* Left sidebar */}
-        <View style={styles.sidebarWrapper}>
-          <ScrollView style={styles.sidebar} showsVerticalScrollIndicator={false} bounces={false}>
-            {subs.map((sc: SubCat) => {
-              const isActive = sc.id === selectedId;
-              return (
-                <TouchableOpacity
-                  key={sc.id}
-                  style={[styles.sidebarItem, isActive && styles.sidebarItemActive]}
-                  onPress={() => setSelectedId(sc.id)}
-                  activeOpacity={0.75}
+        {/* Sidebar with subcategories */}
+        {subCategories.length > 0 && (
+          <View style={styles.sidebarWrapper}>
+            <ScrollView style={styles.sidebar} showsVerticalScrollIndicator={false}>
+              {/* "All" option */}
+              <TouchableOpacity
+                style={[styles.sidebarItem, selectedSubCategory === null && styles.sidebarItemActive]}
+                onPress={() => setSelectedSubCategory(null)}
+                activeOpacity={0.7}
+              >
+                {selectedSubCategory === null && <View style={styles.activeBar} />}
+                <View style={[styles.iconCircle, selectedSubCategory === null && styles.iconCircleActive]}>
+                  <MaterialCommunityIcons
+                    name="dots-grid"
+                    size={20}
+                    color={selectedSubCategory === null ? '#5B2D8E' : '#777'}
+                  />
+                </View>
+                <Text
+                  style={[
+                    styles.sidebarLabel,
+                    selectedSubCategory === null && styles.sidebarLabelActive,
+                  ]}
+                  numberOfLines={2}
                 >
-                  {isActive && <View style={styles.activeBar} />}
-                  <View style={[styles.iconCircle, isActive && styles.iconCircleActive]}>
-                    <SubCatIcon icon={sc.icon} lib={sc.iconLib} size={22} color={isActive ? '#5B2D8E' : '#666'} />
-                  </View>
-                  <Text style={[styles.sidebarLabel, isActive && styles.sidebarLabelActive]} numberOfLines={3}>
-                    {sc.name}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
+                  All
+                </Text>
+              </TouchableOpacity>
 
-        {/* Right product grid */}
+              {/* Subcategories */}
+              {subCategories.map((subCat, idx) => {
+                const isActive = selectedSubCategory === subCat.name;
+                const hasImage = typeof subCat.imageUrl === 'string' && subCat.imageUrl.trim().length > 0;
+                return (
+                  <TouchableOpacity
+                    key={subCat.id}
+                    style={[styles.sidebarItem, isActive && styles.sidebarItemActive]}
+                    onPress={() => setSelectedSubCategory(subCat.name)}
+                    activeOpacity={0.7}
+                  >
+                    {isActive && <View style={styles.activeBar} />}
+                    <View
+                      style={[
+                        styles.iconCircle,
+                        isActive && styles.iconCircleActive,
+                        !hasImage && { backgroundColor: BG_COLORS[idx % BG_COLORS.length], borderWidth: 0 },
+                      ]}
+                    >
+                      {hasImage ? (
+                        <Image
+                          source={{ uri: subCat.imageUrl as string }}
+                          style={{ width: 44, height: 44, borderRadius: 22 }}
+                          resizeMode="cover"
+                        />
+                      ) : (
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: '#555' }}>
+                          {subCat.name.charAt(0).toUpperCase()}
+                        </Text>
+                      )}
+                    </View>
+                    <Text
+                      style={[
+                        styles.sidebarLabel,
+                        isActive && styles.sidebarLabelActive,
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {subCat.name}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Product grid */}
         <ScrollView
           style={styles.productList}
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.productListContent}
         >
-          {rows.length === 0 ? (
+          {productsLoading ? (
+            <View style={styles.emptyState}>
+              <MaterialCommunityIcons name="loading" size={48} color="#5B2D8E" />
+              <Text style={styles.emptyText}>Loading products...</Text>
+            </View>
+          ) : rows.length === 0 ? (
             <View style={styles.emptyState}>
               <MaterialCommunityIcons name="package-variant" size={48} color="#ccc" />
-              <Text style={styles.emptyText}>No products yet</Text>
+              <Text style={styles.emptyText}>No products available</Text>
             </View>
           ) : (
             rows.map((pair, idx) => (
@@ -284,11 +384,10 @@ export default function SubCategoryScreen({
                   <ProductCard
                     key={p.id}
                     product={p}
-                    qty={cartState[String(p.id)] ?? 0}
+                    qty={cartState[p.variantId] ?? 0}
                     onAdd={onAddToCart}
                     onRemove={onRemoveFromCart}
-                    sub={subs.find((s: SubCat) => s.id === p.subCatId)}
-                    onPress={() => onProductPress?.(p)}
+                    onPress={() => onProductPress?.(apiProducts.find(ap => ap.id === p.id)!)}
                   />
                 ))}
                 {pair.length === 1 && <View style={styles.cardPlaceholder} />}
@@ -301,7 +400,7 @@ export default function SubCategoryScreen({
       {/* ── Sort Modal ── */}
       <Modal visible={sortVisible} transparent animationType="slide" onRequestClose={() => setSortVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setSortVisible(false)}>
-          <Pressable style={styles.modalSheet} onPress={() => {}}>
+          <Pressable style={styles.modalSheet} onPress={() => { }}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>Sort By</Text>
             {SORT_OPTIONS.map((opt) => (
@@ -327,7 +426,7 @@ export default function SubCategoryScreen({
       {/* ── Filter Modal ── */}
       <Modal visible={filterVisible} transparent animationType="slide" onRequestClose={() => setFilterVisible(false)}>
         <Pressable style={styles.modalOverlay} onPress={() => setFilterVisible(false)}>
-          <Pressable style={styles.modalSheet} onPress={() => {}}>
+          <Pressable style={styles.modalSheet} onPress={() => { }}>
             <View style={styles.modalHandle} />
             <View style={styles.filterModalHeader}>
               <Text style={styles.modalTitle}>Filters</Text>
@@ -388,7 +487,7 @@ export default function SubCategoryScreen({
 }
 
 const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#fff' },
 
   // Header
   header: {
@@ -409,13 +508,13 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
     gap: 6,
   },
-  backBtn:          { padding: 4 },
-  titleArea:        { flex: 1 },
-  headerTitle:      { fontSize: 15, fontWeight: '700', color: '#111' },
-  deliveryToRow:    { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
-  deliveryToLabel:  { fontSize: 11, color: '#555' },
-  deliveryToVal:    { fontSize: 11, color: '#0C831F', fontWeight: '600' },
-  headerIcons:      { flexDirection: 'row', gap: 6 },
+  backBtn: { padding: 4 },
+  titleArea: { flex: 1 },
+  headerTitle: { fontSize: 15, fontWeight: '700', color: '#111' },
+  deliveryToRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
+  deliveryToLabel: { fontSize: 11, color: '#555' },
+  deliveryToVal: { fontSize: 11, color: '#0C831F', fontWeight: '600' },
+  headerIcons: { flexDirection: 'row', gap: 6 },
   iconBtn: {
     width: 34, height: 34,
     borderRadius: 17,
@@ -445,12 +544,12 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     backgroundColor: '#fff',
   },
-  filterBtnText:    { fontSize: 11, color: '#444', fontWeight: '500' },
+  filterBtnText: { fontSize: 11, color: '#444', fontWeight: '500' },
   filterBtnActive: { borderColor: '#5B2D8E', backgroundColor: '#F3E5F5' },
   filterBtnTextActive: { color: '#5B2D8E', fontWeight: '700' },
 
   // Body
-  body:             { flex: 1, flexDirection: 'row', backgroundColor: '#f5f5f5' },
+  body: { flex: 1, flexDirection: 'row', backgroundColor: '#f5f5f5' },
 
   // Sidebar
   sidebarWrapper: {
@@ -459,7 +558,7 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: '#e0e0e0',
   },
-  sidebar:          { flex: 1 },
+  sidebar: { flex: 1 },
   sidebarItem: {
     alignItems: 'center',
     paddingVertical: 12,
@@ -483,15 +582,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 5,
+    overflow: 'hidden',
   },
   iconCircleActive: { borderColor: '#5B2D8E', borderWidth: 2 },
-  sidebarLabel:     { fontSize: 9, color: '#777', textAlign: 'center', lineHeight: 13 },
+  sidebarLabel: { fontSize: 9, color: '#777', textAlign: 'center', lineHeight: 13 },
   sidebarLabelActive: { color: '#111', fontWeight: '700' },
 
   // Product grid
-  productList:      { flex: 1 },
+  productList: { flex: 1 },
   productListContent: { padding: 6, paddingBottom: 24 },
-  productRow:       { flexDirection: 'row', gap: 6, marginBottom: 6 },
+  productRow: { flexDirection: 'row', gap: 6, marginBottom: 6 },
 
   // Card
   card: {
@@ -506,7 +606,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.06,
     shadowRadius: 2,
   },
-  cardPlaceholder:  { flex: 1 },
+  cardPlaceholder: { flex: 1 },
   imageArea: {
     height: 110,
     justifyContent: 'center',
@@ -531,27 +631,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5, paddingVertical: 2,
   },
   discBadgeText: { color: '#fff', fontSize: 9, fontWeight: '800' },
-  wishlistBtn:      { position: 'absolute', top: 8, right: 8 },
-  priceAddRow:      { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
-  cardContent:      { padding: 7 },
-  weightRow:        { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
-  greenDot:         { width: 7, height: 7, borderRadius: 4, backgroundColor: '#0C831F', marginRight: 4 },
-  weightText:       { fontSize: 10, color: '#0C831F', fontWeight: '600' },
-  productName:      { fontSize: 11, fontWeight: '700', color: '#1a1a1a', lineHeight: 15, marginBottom: 1 },
-  brandText:        { fontSize: 10, color: '#888', marginBottom: 3 },
-  starsRow:         { flexDirection: 'row', marginBottom: 1 },
-  reviewCount:      { fontSize: 9, color: '#888', marginBottom: 3 },
-  deliveryRow:      { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
-  deliveryText:     { fontSize: 10, color: '#0C831F', fontWeight: '600' },
-  stockText:        { fontSize: 10, color: '#FF6B00', fontWeight: '600', marginBottom: 2 },
-  discountText:     { fontSize: 10, color: '#2874F0', fontWeight: '700', marginBottom: 2 },
-  priceRow:         { flexDirection: 'row', alignItems: 'center', marginBottom: 1 },
-  price:            { fontSize: 13, fontWeight: '800', color: '#111' },
-  mrp:              { fontSize: 10, color: '#999', textDecorationLine: 'line-through', marginLeft: 3 },
-  priceUnit:        { fontSize: 9, color: '#999' },
+  wishlistBtn: { position: 'absolute', top: 8, right: 8 },
+  priceAddRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
+  cardContent: { padding: 7 },
+  weightRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 3 },
+  greenDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#0C831F', marginRight: 4 },
+  weightText: { fontSize: 10, color: '#0C831F', fontWeight: '600' },
+  productName: { fontSize: 11, fontWeight: '700', color: '#1a1a1a', lineHeight: 15, marginBottom: 1 },
+  brandText: { fontSize: 10, color: '#888', marginBottom: 3 },
+  starsRow: { flexDirection: 'row', marginBottom: 1 },
+  reviewCount: { fontSize: 9, color: '#888', marginBottom: 3 },
+  deliveryRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
+  deliveryText: { fontSize: 10, color: '#0C831F', fontWeight: '600' },
+  stockText: { fontSize: 10, color: '#FF6B00', fontWeight: '600', marginBottom: 2 },
+  discountText: { fontSize: 10, color: '#2874F0', fontWeight: '700', marginBottom: 2 },
+  priceRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 1 },
+  price: { fontSize: 13, fontWeight: '800', color: '#111' },
+  mrp: { fontSize: 10, color: '#999', textDecorationLine: 'line-through', marginLeft: 3 },
+  priceUnit: { fontSize: 9, color: '#999' },
 
-  emptyState:       { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
-  emptyText:        { color: '#aaa', marginTop: 10 },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingTop: 60 },
+  emptyText: { color: '#aaa', marginTop: 10 },
 
   // Modals
   modalOverlay: {

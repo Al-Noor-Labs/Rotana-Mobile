@@ -29,6 +29,9 @@
       "favicon": "./assets/favicon.png"
     },
     "description": "Fast. Fresh. Delivered. - Your quick commerce solution",
-    "primaryColor": "#667eea"
+    "primaryColor": "#667eea",
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

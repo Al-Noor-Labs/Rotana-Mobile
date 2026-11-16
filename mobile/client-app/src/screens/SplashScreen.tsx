@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAppDispatch } from '../store/hooks';
+import { restoreToken } from '../store/slices/authSlice';
+import { fetchCategories } from '../store/slices/categoriesSlice';
 
 const PURPLE = '#5B2D8E';
 
@@ -9,18 +12,19 @@ interface SplashScreenProps {
 }
 
 export default function SplashScreen({ onFinish }: SplashScreenProps) {
-  const logoFade   = useRef(new Animated.Value(0)).current;
-  const logoScale  = useRef(new Animated.Value(0.55)).current;
-  const tagFade    = useRef(new Animated.Value(0)).current;
-  const ringScale  = useRef(new Animated.Value(1)).current;
-  const dot1Fade   = useRef(new Animated.Value(0.3)).current;
-  const dot2Fade   = useRef(new Animated.Value(0.3)).current;
-  const dot3Fade   = useRef(new Animated.Value(0.3)).current;
+  const dispatch = useAppDispatch();
+  const logoFade = useRef(new Animated.Value(0)).current;
+  const logoScale = useRef(new Animated.Value(0.55)).current;
+  const tagFade = useRef(new Animated.Value(0)).current;
+  const ringScale = useRef(new Animated.Value(1)).current;
+  const dot1Fade = useRef(new Animated.Value(0.3)).current;
+  const dot2Fade = useRef(new Animated.Value(0.3)).current;
+  const dot3Fade = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
-    // Logo entrance
+    // Start animations immediately (don't wait for API)
     Animated.parallel([
-      Animated.timing(logoFade,  { toValue: 1, duration: 650, useNativeDriver: true }),
+      Animated.timing(logoFade, { toValue: 1, duration: 650, useNativeDriver: true }),
       Animated.spring(logoScale, { toValue: 1, tension: 55, friction: 7, useNativeDriver: true }),
     ]).start(() => {
       Animated.timing(tagFade, { toValue: 1, duration: 380, useNativeDriver: true }).start();
@@ -30,7 +34,7 @@ export default function SplashScreen({ onFinish }: SplashScreenProps) {
     Animated.loop(
       Animated.sequence([
         Animated.timing(ringScale, { toValue: 1.18, duration: 900, useNativeDriver: true }),
-        Animated.timing(ringScale, { toValue: 1,    duration: 900, useNativeDriver: true }),
+        Animated.timing(ringScale, { toValue: 1, duration: 900, useNativeDriver: true }),
       ])
     ).start();
 
@@ -38,24 +42,48 @@ export default function SplashScreen({ onFinish }: SplashScreenProps) {
     const dotLoop = () => {
       Animated.stagger(180, [
         Animated.sequence([
-          Animated.timing(dot1Fade, { toValue: 1,   duration: 300, useNativeDriver: true }),
+          Animated.timing(dot1Fade, { toValue: 1, duration: 300, useNativeDriver: true }),
           Animated.timing(dot1Fade, { toValue: 0.3, duration: 300, useNativeDriver: true }),
         ]),
         Animated.sequence([
-          Animated.timing(dot2Fade, { toValue: 1,   duration: 300, useNativeDriver: true }),
+          Animated.timing(dot2Fade, { toValue: 1, duration: 300, useNativeDriver: true }),
           Animated.timing(dot2Fade, { toValue: 0.3, duration: 300, useNativeDriver: true }),
         ]),
         Animated.sequence([
-          Animated.timing(dot3Fade, { toValue: 1,   duration: 300, useNativeDriver: true }),
+          Animated.timing(dot3Fade, { toValue: 1, duration: 300, useNativeDriver: true }),
           Animated.timing(dot3Fade, { toValue: 0.3, duration: 300, useNativeDriver: true }),
         ]),
       ]).start(dotLoop);
     };
     dotLoop();
 
-    const timer = setTimeout(onFinish, 3000);
-    return () => clearTimeout(timer);
-  }, []);
+    // Fetch auth token restoration FIRST
+    console.log('[SPLASH] Starting token restoration...');
+    (async () => {
+      try {
+        const result = await dispatch(restoreToken());
+        console.log('[SPLASH] Token restoration completed');
+        console.log('[SPLASH] Result:', result);
+
+        const hasValidToken = (result as any).payload?.accessToken;
+        console.log('[SPLASH] Has valid token:', !!hasValidToken);
+
+        if (hasValidToken) {
+          console.log('[SPLASH] Valid token found, fetching categories');
+          await dispatch(fetchCategories());
+        } else {
+          console.log('[SPLASH] No valid token, skipping categories');
+        }
+      } catch (error) {
+        console.warn('[SPLASH] Data loading error:', error);
+      } finally {
+        console.log('[SPLASH] All data loaded, ready to navigate');
+        setTimeout(onFinish, 500);
+      }
+    })();
+  }, [dispatch]);
+
+
 
   return (
     <View style={styles.container}>

@@ -13,71 +13,13 @@ import {
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
+import { fetchAddresses, selectAddress } from '../store/slices/addressesSlice';
+import { fetchCategories } from '../store/slices/categoriesSlice';
 import AddButton from '../components/AddButton';
+import { CategoryShimmer } from '../components/CategoryShimmer';
+import { getCategoryImage, getCategoryDisplayName } from '../utils/categoryImages';
 
-// ── Category images (static require — Metro needs literal paths) ──────────────
-const CAT_IMGS = {
-  attaRice:        require('../../assets/Categories Images/Atta, Rice and Dal.png'),
-  dryFruits:       require('../../assets/Categories Images/Dryfruit and Cerels.png'),
-  dairy:           require('../../assets/Categories Images/Dairy, Bread and Eggs.png'),
-  bakery:          require('../../assets/Categories Images/Bakery.png'),
-  oilMasala:       require('../../assets/Categories Images/Oil and Masala.png'),
-  kitchenware:     require('../../assets/Categories Images/Home and Life Style.png'),
-  fruitsVeg:       require('../../assets/Categories Images/Fruits and Vegetables.png'),
-  chicken:         require('../../assets/Categories Images/Chicken, Meath and Fish.png'),
-  teaCoffee:       require('../../assets/Categories Images/Tea and Coffee.png'),
-  sweets:          require('../../assets/Categories Images/Sweets and Chocolates.png'),
-  drinks:          require('../../assets/Categories Images/Drinks and Juices.png'),
-  chips:           require('../../assets/Categories Images/Chips and Namkeens.png'),
-  sauces:          require('../../assets/Categories Images/Sauces and Spreads.png'),
-  panCorner:       require('../../assets/Categories Images/Pan Corner.png'),
-  instantFood:     require('../../assets/Categories Images/Instant Food.png'),
-  iceCreams:       require('../../assets/Categories Images/Ice Creams and More Ctg.png'),
-  skinFace:        require('../../assets/Categories Images/Skin and Face Care.png'),
-  hairCare:        require('../../assets/Categories Images/Hair Care.png'),
-  femHygiene:      require('../../assets/Categories Images/Feminine Hydene.png'),
-  bathBody:        require('../../assets/Categories Images/Bath and Body.png'),
-  stationary:      require('../../assets/Categories Images/Stationary and Games.png'),
-  electronics:     require('../../assets/Categories Images/Electronics.png'),
-  cleaners:        require('../../assets/Categories Images/Cleaner and Repelleant.png'),
-  toys:            require('../../assets/Categories Images/Toystore.png'),
-};
-
-const categories = [
-  { id: 1, name: 'Atta, Rice\n& Dal',        image: CAT_IMGS.attaRice,    bgColor: '#FFF3E0' },
-  { id: 2, name: 'Dry Fruits &\nCereals',     image: CAT_IMGS.dryFruits,   bgColor: '#FFE0E0' },
-  { id: 3, name: 'Dairy, Bread\n& Eggs',      image: CAT_IMGS.dairy,       bgColor: '#E3F2FD' },
-  { id: 4, name: 'Bakery &\nBiscuits',        image: CAT_IMGS.bakery,      bgColor: '#FFF9C4' },
-  { id: 5, name: 'Oil &\nMasala',             image: CAT_IMGS.oilMasala,   bgColor: '#FFE0E0' },
-  { id: 6, name: 'Kitchenware\n& Appliances', image: CAT_IMGS.kitchenware, bgColor: '#F3E5F5' },
-  { id: 7, name: 'Fruits and\nVegetables',    image: CAT_IMGS.fruitsVeg,   bgColor: '#E8F5E9' },
-  { id: 8, name: 'Chicken,\nMeat & Fish',     image: CAT_IMGS.chicken,     bgColor: '#FFEBEE' },
-];
-
-const snacksCategories = [
-  { id: 1, name: 'Tea &\nCoffee',       image: CAT_IMGS.teaCoffee,   bgColor: '#FFF3E0' },
-  { id: 2, name: 'Sweets &\nChocolates',image: CAT_IMGS.sweets,      bgColor: '#FFE0E0' },
-  { id: 3, name: 'Drinks &\nJuices',    image: CAT_IMGS.drinks,      bgColor: '#E3F2FD' },
-  { id: 4, name: 'Chips &\nNamkeen',    image: CAT_IMGS.chips,       bgColor: '#FFEBEE' },
-  { id: 5, name: 'Sauces &\nSpreads',   image: CAT_IMGS.sauces,      bgColor: '#FFF9C4' },
-  { id: 6, name: 'Pan\nCorner',         image: CAT_IMGS.panCorner,   bgColor: '#E8F5E9' },
-  { id: 7, name: 'Instant\nFood',       image: CAT_IMGS.instantFood, bgColor: '#FFF3E0' },
-  { id: 8, name: 'Ice Creams\n& More',  image: CAT_IMGS.iceCreams,   bgColor: '#E1F5FE' },
-];
-
-const beautyCategories = [
-  { id: 1, name: 'Skin &\nFace',       image: CAT_IMGS.skinFace,   bgColor: '#FCE4EC' },
-  { id: 2, name: 'Hair Care',           image: CAT_IMGS.hairCare,   bgColor: '#F3E5F5' },
-  { id: 3, name: 'Feminine\nHygiene',   image: CAT_IMGS.femHygiene, bgColor: '#FFE0E0' },
-  { id: 4, name: 'Bath\n& Body',        image: CAT_IMGS.bathBody,   bgColor: '#E3F2FD' },
-];
-
-const householdCategories = [
-  { id: 1, name: 'Stationary &\nGames',    image: CAT_IMGS.stationary,  bgColor: '#FFF3E0' },
-  { id: 2, name: 'Electronics',             image: CAT_IMGS.electronics, bgColor: '#E3F2FD' },
-  { id: 3, name: 'Cleaners &\nRepellents',  image: CAT_IMGS.cleaners,    bgColor: '#E8F5E9' },
-  { id: 4, name: 'Toys',                    image: CAT_IMGS.toys,        bgColor: '#FFE0E0' },
-];
 
 const SEARCH_HINTS = [
   'atta',
@@ -94,23 +36,13 @@ const SEARCH_HINTS = [
   'chocolates',
 ];
 
-const DUMMY_ADDRESSES = [
-  { id: 1, type: 'Home', address: '1234, 1st Floor, Hi Tech City', city: 'Hyderabad, 500081' },
-  { id: 2, type: 'Work', address: 'Plot 12, Cyber Towers, HITEC City', city: 'Hyderabad, 500081' },
-];
-
-const HOME_PRODUCTS = [
-  { id: 'home-p1', emoji: '🍗', weight: '400 g',  name: 'Chicken Curry Cut',    price: '₹9/100g' },
-  { id: 'home-p2', emoji: '🐔', weight: '1000 g', name: 'Whole Chicken',         price: '₹9/100g' },
-  { id: 'home-p3', emoji: '🐟', weight: '1 kg',   name: 'Indian Curry Cut Fish', price: '₹8/100g' },
-];
-
 interface HomeScreenProps {
   onCategoryPress?: (name: string) => void;
   onSearchPress?: () => void;
   onProfilePress?: () => void;
   onCartPress?: () => void;
   onRationKitsPress?: () => void;
+  onAddAddressPress?: () => void;
   cartState: Record<string, number>;
   onAddToCart: (productId: string) => void;
   onRemoveFromCart: (productId: string) => void;
@@ -122,14 +54,64 @@ export default function HomeScreen({
   onProfilePress,
   onCartPress,
   onRationKitsPress,
+  onAddAddressPress,
   cartState,
   onAddToCart,
   onRemoveFromCart,
 }: HomeScreenProps) {
+  const dispatch = useAppDispatch();
+  const { isAuthenticated } = useAppSelector((state) => state.auth);
+  const { categories: apiCategories, isLoading } = useAppSelector((state) => state.categories);
+  const { addresses, selectedAddressId } = useAppSelector((state) => state.addresses);
+
+  // Safety net: if categories are empty when HomeScreen mounts (e.g. splash fetch
+  // was skipped due to auth failure), trigger the fetch here.
+  useEffect(() => {
+    if (apiCategories.length === 0 && !isLoading) {
+      dispatch(fetchCategories());
+    }
+    // Only fetch addresses if user is authenticated
+    if (isAuthenticated) {
+      dispatch(fetchAddresses());
+    }
+  }, [dispatch, apiCategories.length, isLoading, isAuthenticated]);
+
   const [addressModalVisible, setAddressModalVisible] = useState(false);
-  const [selectedAddressId, setSelectedAddressId] = useState(1);
   const [headerHeight, setHeaderHeight] = useState(0);
   const [stickyVisible, setStickyVisible] = useState(false);
+
+  // Build categories array from API data with images and colors
+  // Filter to ONLY show parent categories (no parentId)
+  const categories = apiCategories.length > 0
+    ? apiCategories
+        .filter((cat) => !cat.parentId) // ✅ Only parent categories
+        .filter((cat) => !cat.name.includes('Test Category'))
+        .map((apiCat, idx) => {
+          // Try to use API imageUrl first, fall back to local mapping
+          let image = null;
+          let bgColor = '#FFF3E0';
+
+          if (apiCat.imageUrl) {
+            // Use API image URL if available
+            image = { uri: apiCat.imageUrl };
+          } else {
+            // Fall back to local image mapping
+            const { image: localImg, bgColor: localBg } = getCategoryImage(apiCat.name, idx);
+            image = localImg;
+            bgColor = localBg;
+          }
+
+          const displayName = getCategoryDisplayName(apiCat.name);
+          return {
+            id: apiCat.id,
+            name: displayName.replace(/\s+/g, '\n'),
+            apiName: apiCat.name,
+            image,
+            bgColor,
+            isFromApi: !!apiCat.imageUrl,
+          };
+        })
+    : [];
 
   // ── Animated search hint ticker ─────────────────────────────────────────
   const [hintIndex, setHintIndex] = useState(0);
@@ -163,7 +145,7 @@ export default function HomeScreen({
     return () => clearInterval(interval);
   }, []);
   // ────────────────────────────────────────────────────────────────────────
-  const selectedAddress = DUMMY_ADDRESSES.find((a) => a.id === selectedAddressId)!
+  const selectedAddress = addresses.find(a => a.id === selectedAddressId);
   const insets = useSafeAreaInsets();
 
   const searchBar = (
@@ -212,7 +194,7 @@ export default function HomeScreen({
                 activeOpacity={0.8}
               >
                 <Text style={styles.address} numberOfLines={1}>
-                  {selectedAddress.address}
+                  {selectedAddress ? `${selectedAddress.line1}, ${selectedAddress.city}` : 'Select Address'}
                 </Text>
                 <MaterialCommunityIcons name="chevron-down" size={14} color="rgba(255,255,255,0.8)" style={{ marginLeft: 4 }} />
               </TouchableOpacity>
@@ -282,90 +264,23 @@ export default function HomeScreen({
         </TouchableOpacity>
 
         <>
-            {/* Groceries and Kitchen */}
+            {/* All Categories from API */}
             <View style={[styles.section, { marginTop: 16 }]}>
-              <Text style={styles.sectionTitle}>Groceries and Kitchen</Text>
-              <View style={styles.categoryGrid}>
-                {categories.map((category) => (
-                  <TouchableOpacity key={category.id} style={styles.categoryCard} onPress={() => onCategoryPress?.(category.name.replace(/\n/g, ' '))}>
-                    <View style={[styles.categoryIconBox, { backgroundColor: category.bgColor }]}>
-                      <Image source={category.image} style={styles.categoryImage} resizeMode="cover" />
-                    </View>
-                    <Text style={styles.categoryName}>{category.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Snacks & Drinks */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Snacks & Drinks</Text>
-              <View style={styles.categoryGrid}>
-                {snacksCategories.map((category) => (
-                  <TouchableOpacity key={category.id} style={styles.categoryCard} onPress={() => onCategoryPress?.(category.name.replace(/\n/g, ' '))}>
-                    <View style={[styles.categoryIconBox, { backgroundColor: category.bgColor }]}>
-                      <Image source={category.image} style={styles.categoryImage} resizeMode="contain" />
-                    </View>
-                    <Text style={styles.categoryName}>{category.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Beauty & Personal Care */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Beauty & Personal Care</Text>
-              <View style={styles.categoryGrid}>
-                {beautyCategories.map((category) => (
-                  <TouchableOpacity key={category.id} style={styles.categoryCard} onPress={() => onCategoryPress?.(category.name.replace(/\n/g, ' '))}>
-                    <View style={[styles.categoryIconBox, { backgroundColor: category.bgColor }]}>
-                      <Image source={category.image} style={styles.categoryImage} resizeMode="contain" />
-                    </View>
-                    <Text style={styles.categoryName}>{category.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Household */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Household</Text>
-              <View style={styles.categoryGrid}>
-                {householdCategories.map((category) => (
-                  <TouchableOpacity key={category.id} style={styles.categoryCard} onPress={() => onCategoryPress?.(category.name.replace(/\n/g, ' '))}>
-                    <View style={[styles.categoryIconBox, { backgroundColor: category.bgColor }]}>
-                      <Image source={category.image} style={styles.categoryImage} resizeMode="contain" />
-                    </View>
-                    <Text style={styles.categoryName}>{category.name}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
-
-            {/* Chicken, Meat & Fish */}
-            <View style={styles.section}>
-              <Text style={styles.sectionTitle}>Chicken, Meat & Fish</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 8 }}>
-                {HOME_PRODUCTS.map((item) => (
-                  <View key={item.id} style={styles.productCard}>
-                    <View style={styles.productImage}>
-                      <Text style={styles.productImagePlaceholder}>{item.emoji}</Text>
-                    </View>
-                    <Text style={styles.productWeight}>{item.weight}</Text>
-                    <Text style={styles.productName}>{item.name}</Text>
-                    <View style={styles.productBottomRow}>
-                      <Text style={styles.productPrice}>{item.price}</Text>
-                      <AddButton
-                        productId={item.id}
-                        quantity={cartState[item.id] ?? 0}
-                        onAdd={onAddToCart}
-                        onRemove={onRemoveFromCart}
-                        size="sm"
-                      />
-                    </View>
-                  </View>
-                ))}
-              </ScrollView>
+              <Text style={styles.sectionTitle}>Categories</Text>
+              {isLoading ? (
+                <CategoryShimmer />
+              ) : categories.length > 0 ? (
+                <View style={styles.categoryGrid}>
+                  {categories.map((category) => (
+                    <TouchableOpacity key={category.id} style={styles.categoryCard} onPress={() => onCategoryPress?.(category.apiName)}>
+                      <View style={[styles.categoryIconBox, { backgroundColor: category.bgColor }]}>
+                        <Image source={category.image} style={styles.categoryImage} resizeMode="cover" />
+                      </View>
+                      <Text style={styles.categoryName}>{category.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : null}
             </View>
         </>
 
@@ -401,31 +316,41 @@ export default function HomeScreen({
                 <MaterialCommunityIcons name="close" size={22} color="#555" />
               </TouchableOpacity>
             </View>
-            {DUMMY_ADDRESSES.map((addr) => (
+            {addresses.map((addr) => (
               <TouchableOpacity
                 key={addr.id}
                 style={[styles.addressRow, selectedAddressId === addr.id && styles.addressRowActive]}
-                onPress={() => { setSelectedAddressId(addr.id); setAddressModalVisible(false); }}
+                onPress={() => {
+                  dispatch(selectAddress(addr.id));
+                  setAddressModalVisible(false);
+                }}
                 activeOpacity={0.75}
               >
                 <View style={[styles.addrIconBox, selectedAddressId === addr.id && styles.addrIconBoxActive]}>
                   <MaterialCommunityIcons
-                    name={addr.type === 'Home' ? 'home-outline' : 'briefcase-outline'}
+                    name={addr.label.toLowerCase().includes('home') ? 'home-outline' : 'briefcase-outline'}
                     size={20}
                     color={selectedAddressId === addr.id ? '#0C831F' : '#888'}
                   />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.addrType}>{addr.type}</Text>
-                  <Text style={styles.addrLine} numberOfLines={1}>{addr.address}</Text>
-                  <Text style={styles.addrCity}>{addr.city}</Text>
+                  <Text style={styles.addrType}>{addr.label}</Text>
+                  <Text style={styles.addrLine} numberOfLines={1}>{addr.line1}</Text>
+                  <Text style={styles.addrCity}>{addr.city}, {addr.state} - {addr.pincode}</Text>
                 </View>
                 {selectedAddressId === addr.id && (
                   <MaterialCommunityIcons name="check-circle" size={20} color="#0C831F" />
                 )}
               </TouchableOpacity>
             ))}
-            <TouchableOpacity style={styles.addAddressBtn} activeOpacity={0.8}>
+            <TouchableOpacity
+              style={styles.addAddressBtn}
+              activeOpacity={0.8}
+              onPress={() => {
+                setAddressModalVisible(false);
+                onAddAddressPress?.();
+              }}
+            >
               <MaterialCommunityIcons name="plus-circle-outline" size={20} color="#0C831F" />
               <Text style={styles.addAddressText}> Add New Address</Text>
             </TouchableOpacity>
@@ -586,7 +511,7 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: 'bold',
     color: '#000',
     paddingHorizontal: 16,
@@ -616,7 +541,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   categoryName: {
-    fontSize: 10,
+    fontSize:10,
     color: '#333',
     textAlign: 'center',
     lineHeight: 13,
